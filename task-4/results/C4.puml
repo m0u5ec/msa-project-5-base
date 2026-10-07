@@ -1,0 +1,37 @@
+@startuml C4_SpringBatch_ToBe
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма контейнеров To Be после внедрения Spring Batch
+
+Person(worker, "Сотрудник склада", "Загружает CSV-отчеты по остаткам в конце смены")
+
+System_Boundary(cloud_gcp, "Облачная инфраструктура GCP") {
+
+    Container(frontend, "Фронтенд-приложение", "Angular, WebSockets", "Отображает интерфейс, отправляет файл и слушает статус обработки через веб-сокеты")
+
+    Container(monolith, "Монолитный Бэкенд", "Java 11, WildFly", "Принимает файл, сохраняет в GCS, отправляет ID задачи в очередь сообщений и мгновенно возвращает ответ")
+
+    Container(queue, "Очередь задач", "GCP Pub/Sub / RabbitMQ", "Хранит запросы на обработку отчетов при пиковых параллельных загрузках")
+
+    Container(batch_service, "Spring Batch ETL Сервис", "Java 11, Spring Boot", "Асинхронно читает файлы пачками (chunks), валидирует, обогащает справочниками и пишет в БД")
+
+    ContainerDb(postgres_db, "База данных", "PostgreSQL", "Содержит таблицы номенклатуры, справочники товаров и служебные таблицы метаданных Spring Batch")
+
+    Container(gcs_storage, "Файловое хранилище", "Google Cloud Storage (GCS)", "Хранит входящие файлы отчетов со складов")
+}
+
+Rel(worker, frontend, "Использует веб-интерфейс")
+Rel(frontend, monolith, "Загружает CSV-отчет (REST API / JSON / HTTP)", "HTTP")
+Rel(monolith, gcs_storage, "1. Сохраняет файл отчета")
+Rel(monolith, queue, "2. Публикует событие 'Файл загружен' (ID задачи)")
+
+Rel_Left(batch_service, queue, "3. Асинхронно забирает задачу на обработку")
+Rel(batch_service, gcs_storage, "4. Стримит данные из файла пачками (Chunk-reading)")
+Rel(batch_service, postgres_db, "5. Обогащает данные и делает пакетный Insert/Update")
+
+Rel(batch_service, monolith, "6. Обновляет статус выполнения (Успех/Ошибка)")
+Rel_Right(monolith, frontend, "7. Отправляет уведомление о завершении", "WebSockets")
+
+@enduml

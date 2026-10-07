@@ -1,0 +1,15 @@
+FROM python:3.12-alpine
+
+# Установка системных зависимостей для компиляции psycopg2
+RUN apk add --no-cache postgresql-dev gcc musl-dev
+
+WORKDIR /app
+
+# Установка библиотеки для работы с PostgreSQL
+RUN pip install --no-cache-dir psycopg2-binary
+
+# Копируем наш скрипт автоматизации
+COPY export_shipments.py .
+
+# Запуск скрипта при старте контейнера
+CMD ["python", "export_shipments.py"]

@@ -1,0 +1,59 @@
+@startuml C4_ELK_Monitoring_ToBe
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма контейнеров TradeWare (ETL на Spring Batch + Мониторинг Prometheus + Логирование ELK)
+
+Person(worker, "Сотрудник склада", "Загружает CSV-отчёты по остаткам в конце смены")
+
+System_Boundary(cloud_gcp, "Облачная инфраструктура GCP") {
+
+    ' Основные компоненты бизнес-логики (ETL вынесен)
+    Container(frontend, "Фронтенд-приложение", "Angular, WebSockets", "Отображает интерфейс, генерирует сквозной trace_id")
+    Container(monolith, "Монолитный Бэкенд", "Java 11, WildFly", "Принимает файл, сохраняет в GCS, отправляет ID задачи в очередь")
+    Container(queue, "Очередь задач", "GCP Pub/Sub / RabbitMQ", "Буферизирует запросы на обработку отчётов при пиковых нагрузках")
+    Container(batch_service, "Spring Batch ETL Сервис", "Java 11, Spring Boot", "Асинхронно обрабатывает чанки, обогащает данные и пишет логи/метрики")
+
+    ContainerDb(postgres_db, "База данных", "PostgreSQL", "Хранит бизнес-таблицы остатков и системные таблицы метаданных Spring Batch")
+    Container(gcs_storage, "Файловое хранилище", "Google Cloud Storage (GCS)", "Хранит входящие файлы отчётов со складов")
+
+    ' Слой сбора данных наблюдаемости (Observability-компоненты)
+    Container(filebeat, "Log Shipper (Filebeat)", "DaemonSet / Sidecar", "Легковесный агент. Перехватывает JSON-логи из stdout контейнеров")
+    Container(logstash, "ETL логов (Logstash)", "Logstash Pipeline", "Парсит, фильтрует и структурирует логи перед отправкой в БД")
+    Container(prometheus, "Сервер Мониторинга", "Prometheus", "Раз в 15 секунд собирает числовые метрики и показатели SLA приложений по модели Pull")
+
+    ' Слой хранения данных и визуализации
+    ContainerDb(elasticsearch, "БД логов", "Elasticsearch", "Индексирует текстовые данные, обеспечивает мгновенный поиск по trace_id")
+    Container(kibana, "Панель анализа логов", "Kibana", "Интерфейс для полнотекстового поиска по Stack Trace и логам для разработчиков")
+    Container(grafana, "Панель метрик и Алертинг", "Grafana", "Визуализирует графики SLA (<30 сек на 2000 строк) и управляет триггерами алертов")
+
+    ' Внешние каналы уведомлений
+    Container(telegram_slack, "Каналы оповещений", "Telegram Bot / Slack Webhook", "Принимает экстренные уведомления о сбоях")
+}
+
+' Бизнес-потоки данных
+Rel(worker, frontend, "Использует веб-интерфейс")
+Rel(frontend, monolith, "Загружает CSV-отчёт (REST API + trace_id)", "HTTP")
+Rel(monolith, gcs_storage, "Сохраняет файл отчёта")
+Rel(monolith, queue, "Публикует событие 'Файл загружен' (ID задачи)")
+Rel(queue, batch_service, "Асинхронно забирает задачу на обработку")
+Rel(batch_service, gcs_storage, "Стримит данные из файла пачками (Chunks)")
+Rel(batch_service, postgres_db, "Обновляет метаданные батча и делает пакетный Insert/Update бизнес-данных")
+
+' Потоки логирования (ELK)
+Rel_D(monolith, filebeat, "Выводит JSON-логи с trace_id", "stdout")
+Rel_D(batch_service, filebeat, "Выводит JSON-логи с trace_id", "stdout")
+Rel(filebeat, logstash, "Пересылает сырые логи", "Lumberjack протокол / TCP")
+Rel(logstash, elasticsearch, "Записывает структурированные логи", "HTTP REST API")
+Rel(kibana, elasticsearch, "Запрашивает логи для поиска и отладки", "HTTP")
+
+' Потоки метрик (Prometheus + Grafana)
+Rel(prometheus, monolith, "Опрашивает числовые метрики (/actuator/prometheus)", "HTTP Pull")
+Rel(prometheus, batch_service, "Опрашивает числовые метрики (/actuator/prometheus)", "HTTP Pull")
+Rel(grafana, prometheus, "Запрашивает метрики для графиков SLA (PromQL)", "HTTP")
+
+' Поток оповещений
+Rel(grafana, telegram_slack, "Отправляет критические алерты при сбое джобы или нарушении SLA", "HTTPS Webhook")
+
+@enduml
