@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  labels:
+    app: postgres
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS shipments (
+        id SERIAL PRIMARY KEY,
+        client_id INT,
+        driver_id INT,
+        vehicle_id INT,
+        status VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Наполняем тестовыми данными для выгрузки
+    INSERT INTO shipments (client_id, driver_id, vehicle_id, status) VALUES
+    (101, 501, 901, 'In Transit'),
+    (102, 502, 902, 'Delivered'),
+    (103, 503, 903, 'Pending'),
+    (104, 504, 904, 'Cancelled');
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: "analytics"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: init-volume
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-volume
+          configMap:
+            name: postgres-init-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+spec:
+  selector:
+    app: postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432

@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shipments-exporter-cronjob
+  labels:
+    app: analytics-exporter
+spec:
+  schedule: "0 20 * * *" # Ровно в 20:00 каждый день
+  concurrencyPolicy: Forbid # Запретить параллельный запуск, если прошлая джоба застряла
+  successfulJobsHistoryLimit: 3 # Сколько успешных подов хранить в истории
+  failedJobsHistoryLimit: 3 # Сколько упавших подов хранить для отладки
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            job: shipments-export
+        spec:
+          containers:
+            - name: exporter
+              image: shipments-exporter:latest # Локальный образ в вашем MiniKube
+              imagePullPolicy: IfNotPresent
+              env:
+                # Переменные для подключения к вашей БД в K8s
+                - name: DB_HOST
+                  value: "postgres-service"
+                - name: DB_NAME
+                  value: "analytics"
+                - name: DB_USER
+                  value: "postgres"
+                - name: DB_PASSWORD
+                  value: "postgres"
+              resources:
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+                requests:
+                  cpu: "200m"
+                  memory: "256Mi"
+          restartPolicy: OnFailure # Перезапускать под только в случае аппаратного/программного сбоя
