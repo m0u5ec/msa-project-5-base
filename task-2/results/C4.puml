@@ -1,0 +1,20 @@
+@startuml C4_Elements
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма контекста системы To Be (Модуль генерации прайс-листов)
+
+Person(b2b_client, "B2B Клиент", "Любой потребитель отчетов")
+
+System_Boundary(cloud_k8s, "K8s") {
+System(cronjob, "B2B Price Exporter (K8s CronJob)", "Автономный контейнер на Python. Запускается по расписанию в 06:00.")
+SystemDb(postgres_db, "БД прайс-листов (PostgreSQL)", "Актуальные данные о ценах на товары.")
+System(s3_storage, "Облачное хранилище", "Хранилище сгенерированных кастомных CSV/XLS прайс-листов.")
+}
+
+Rel(cronjob, postgres_db, "1. Запрашивает связанные данные (SQL JOIN)", "psycopg2 / asyncpg")
+Rel(cronjob, s3_storage, "2. Загружает готовый CSV-файл", "HTTPS")
+Rel(b2b_client, s3_storage, "3. Скачивает кастомный прайс-лист по прямой ссылке", "HTTPS / REST API")
+
+@enduml
